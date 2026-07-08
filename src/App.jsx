@@ -5,7 +5,7 @@ import {
 import {
   Users, User, Utensils, Scale, Dumbbell, ClipboardList, LogOut, Plus,
   Plane, TrendingUp, TrendingDown, Minus, ChevronRight, X, Check,
-  ArrowLeft, Loader2, ImagePlus, Home, Ruler, Mail, Lock,
+  ArrowLeft, Loader2, ImagePlus, Home, Ruler, Mail, Lock, Flame, Sparkles, Trophy,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -13,7 +13,7 @@ import { supabase } from "./supabaseClient";
 const C = {
   bg: "#12171B", panel: "#1B2228", panelAlt: "#212A31", border: "#2B353D",
   text: "#EDF1F1", muted: "#8A969D", jade: "#3FA372", jadeDim: "#274A3A",
-  gold: "#C9A15A", coral: "#D9765F",
+  jadeBright: "#4FD08C", gold: "#C9A15A", goldBright: "#E4C486", coral: "#D9765F",
 };
 const cardSt = { background: C.panel, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16 };
 const inputSt = {
@@ -27,6 +27,151 @@ const labelSt = { fontSize: 12, color: C.muted, marginBottom: 6, display: "block
 const uid = () => Math.random().toString(36).slice(2, 10);
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d) => { if (!d) return ""; const [, m, day] = d.split("-"); return `${m}/${day}`; };
+
+/* ---------------- 动力小工具：连续打卡 / 本周活跃 / 数字滚动 ---------------- */
+function computeStreak(dateStrs) {
+  const days = new Set(dateStrs.filter(Boolean));
+  if (days.size === 0) return 0;
+  const oneDay = 86400000;
+  let cursor = new Date(`${todayStr()}T00:00:00`);
+  if (!days.has(cursor.toISOString().slice(0, 10))) {
+    cursor = new Date(cursor.getTime() - oneDay);
+    if (!days.has(cursor.toISOString().slice(0, 10))) return 0;
+  }
+  let streak = 0;
+  while (days.has(cursor.toISOString().slice(0, 10))) {
+    streak += 1;
+    cursor = new Date(cursor.getTime() - oneDay);
+  }
+  return streak;
+}
+function activeDaysThisWeek(dateStrs) {
+  const days = new Set(dateStrs.filter(Boolean));
+  const now = new Date(`${todayStr()}T00:00:00`);
+  const dow = (now.getDay() + 6) % 7; // 周一=0
+  let count = 0;
+  for (let i = 0; i <= dow; i++) {
+    const d = new Date(now.getTime() - i * 86400000).toISOString().slice(0, 10);
+    if (days.has(d)) count += 1;
+  }
+  return count;
+}
+const MOTIVATIONAL_LINES = [
+  "今天也要成为更强的自己 💪",
+  "每一次记录，都是进步的证据",
+  "身体是最诚实的语言，继续对话吧",
+  "坚持，是为了配得上更好的自己",
+  "强壮不是终点，是每天的选择",
+  "微小的积累，正在改变你的身体",
+  "汗水不会说谎，继续前进",
+];
+function motivationalLine() {
+  const start = new Date(new Date().getFullYear(), 0, 0);
+  const diff = new Date() - start;
+  const dayOfYear = Math.floor(diff / 86400000);
+  return MOTIVATIONAL_LINES[dayOfYear % MOTIVATIONAL_LINES.length];
+}
+function greetingWord() {
+  const h = new Date().getHours();
+  if (h < 5) return "夜深了";
+  if (h < 11) return "早上好";
+  if (h < 14) return "中午好";
+  if (h < 18) return "下午好";
+  return "晚上好";
+}
+function AnimatedNumber({ value, decimals = 1, suffix = "" }) {
+  const [display, setDisplay] = useState(0);
+  const fromRef = useRef(0);
+  useEffect(() => {
+    const target = typeof value === "number" ? value : 0;
+    const from = fromRef.current;
+    const start = performance.now();
+    const dur = 700;
+    let raf;
+    function tick(now) {
+      const p = Math.min(1, (now - start) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setDisplay(from + (target - from) * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+      else fromRef.current = target;
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  if (typeof value !== "number") return <>--</>;
+  return <>{display.toFixed(decimals)}{suffix}</>;
+}
+function ActivityRing({ value, total = 7, size = 54, color = C.jadeBright }) {
+  const stroke = 6;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = total > 0 ? Math.min(1, value / total) : 0;
+  return (
+    <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+      <circle cx={size / 2} cy={size / 2} r={r} stroke={C.border} strokeWidth={stroke} fill="none" />
+      <circle
+        cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none"
+        strokeDasharray={c} strokeDashoffset={c * (1 - pct)} strokeLinecap="round"
+        style={{ transition: "stroke-dashoffset 900ms cubic-bezier(.22,1,.36,1)" }}
+      />
+    </svg>
+  );
+}
+function StreakBadge({ days }) {
+  if (!days) return null;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 700,
+      color: C.goldBright, background: "linear-gradient(135deg, rgba(201,161,90,0.22), rgba(217,118,95,0.16))",
+      border: `1px solid rgba(201,161,90,0.4)`, borderRadius: 20, padding: "3px 10px",
+    }}>
+      <Flame size={13} color={C.goldBright} /> 连续打卡 {days} 天
+    </span>
+  );
+}
+
+/* ---------------- 庆祝提示 Toast ---------------- */
+const SUCCESS_LINES = [
+  "记录成功，继续加油！", "太棒了，又前进一步！", "干得漂亮，坚持就是胜利！",
+  "已保存，你正在变得更强！", "这一步，值得为自己鼓掌！",
+];
+function useCelebration() {
+  const [toast, setToast] = useState(null);
+  const timerRef = useRef(null);
+  const fire = useCallback((opts = {}) => {
+    const { big = false, message } = opts;
+    clearTimeout(timerRef.current);
+    setToast({
+      id: uid(), big,
+      message: message || SUCCESS_LINES[Math.floor(Math.random() * SUCCESS_LINES.length)],
+    });
+    timerRef.current = setTimeout(() => setToast(null), big ? 2600 : 1800);
+  }, []);
+  return [toast, fire];
+}
+function CelebrationToast({ toast }) {
+  if (!toast) return null;
+  return (
+    <div key={toast.id} style={{
+      position: "fixed", left: "50%", bottom: toast.big ? "50%" : 96, transform: toast.big ? "translate(-50%,50%)" : "translateX(-50%)",
+      zIndex: 60, display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+      animation: toast.big ? "popIn 420ms cubic-bezier(.22,1.4,.36,1)" : "toastUp 320ms cubic-bezier(.22,1,.36,1)",
+      pointerEvents: "none",
+    }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8,
+        background: toast.big ? `linear-gradient(135deg, ${C.jade}, ${C.jadeDim})` : C.panelAlt,
+        border: `1px solid ${toast.big ? C.jadeBright : C.border}`,
+        color: C.text, borderRadius: 999, padding: toast.big ? "14px 22px" : "9px 16px",
+        fontSize: toast.big ? 15 : 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+        whiteSpace: "nowrap",
+      }}>
+        {toast.big ? <Trophy size={18} color={C.goldBright} /> : <Check size={15} color={C.jadeBright} />}
+        {toast.message}
+      </div>
+    </div>
+  );
+}
 
 function resizeImageToBlob(file, maxW = 700, quality = 0.7) {
   return new Promise((resolve, reject) => {
@@ -79,7 +224,19 @@ function TrendArrow({ delta }) {
   if (delta < 0) return <span style={{ color: C.jade, display: "flex", alignItems: "center", gap: 2, fontSize: 12 }}><TrendingDown size={14} />{delta}</span>;
   return <span style={{ color: C.muted, fontSize: 12 }}>持平</span>;
 }
-function EmptyState({ text }) { return <div style={{ textAlign: "center", padding: "28px 10px", color: C.muted, fontSize: 13 }}>{text}</div>; }
+function EmptyState({ text, icon: Icon }) {
+  return (
+    <div style={{ textAlign: "center", padding: "34px 10px", color: C.muted, fontSize: 13 }}>
+      {Icon && (
+        <div style={{
+          width: 44, height: 44, margin: "0 auto 10px", borderRadius: "50%", background: C.panelAlt,
+          border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center",
+        }}><Icon size={20} color={C.muted} /></div>
+      )}
+      {text}
+    </div>
+  );
+}
 function TripBadge() {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: C.jadeDim, color: C.jade, fontSize: 11, padding: "2px 8px", borderRadius: 20 }}><Plane size={11} /> 出差</span>;
 }
@@ -157,6 +314,13 @@ function Shell({ children }) {
         .spin{animation:spin 1s linear infinite}
         @keyframes spin{to{transform:rotate(360deg)}}
         *{box-sizing:border-box}
+        @keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes popIn{0%{opacity:0;transform:translate(-50%,50%) scale(.75)}60%{opacity:1;transform:translate(-50%,50%) scale(1.05)}100%{opacity:1;transform:translate(-50%,50%) scale(1)}}
+        @keyframes toastUp{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translateX(-50%)}}
+        @keyframes glowPulse{0%,100%{box-shadow:0 0 0 0 rgba(63,163,114,0.35)}50%{box-shadow:0 0 0 6px rgba(63,163,114,0)}}
+        .fade-up{animation:fadeInUp 420ms cubic-bezier(.22,1,.36,1) both}
+        .press-fx{transition:transform 120ms ease}
+        .press-fx:active{transform:scale(0.96)}
       `}</style>
       {children}
     </div>
@@ -229,7 +393,7 @@ function AuthScreen() {
       </div>
       {err && <div style={{ color: C.coral, fontSize: 13, marginBottom: 12 }}>{err}</div>}
       {notice && <div style={{ color: C.jade, fontSize: 13, marginBottom: 12 }}>{notice}</div>}
-      <button style={btnPrimary} onClick={submit} disabled={busy}>
+      <button className="press-fx" style={btnPrimary} onClick={submit} disabled={busy}>
         {busy ? "处理中…" : mode === "login" ? "登录" : "注册"}
       </button>
       <div style={{ fontSize: 11, color: C.muted, marginTop: 18, textAlign: "center", lineHeight: 1.6 }}>
@@ -298,12 +462,12 @@ function CoachHome({ clients, summaries, loading, onOpen, onLogout }) {
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>我的客户 <span style={{ color: C.muted, fontWeight: 400 }}>({clients.length})</span></div>
         <div style={{ fontSize: 11, color: C.muted, marginBottom: 14 }}>新客户请让他们自行在登录页"注册新账号"，注册后会自动出现在这里</div>
         {loading && <div style={{ color: C.muted, fontSize: 13 }}>加载中…</div>}
-        {!loading && clients.length === 0 && <EmptyState text="还没有客户注册。把 App 链接发给客户，请他们自行注册即可。" />}
+        {!loading && clients.length === 0 && <EmptyState text="还没有客户注册。把 App 链接发给客户，请他们自行注册即可。" icon={Users} />}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {clients.map((c) => {
+          {clients.map((c, i) => {
             const s = map[c.id];
             return (
-              <button key={c.id} onClick={() => onOpen(c)} style={{ ...cardSt, textAlign: "left", cursor: "pointer", color: C.text }}>
+              <button key={c.id} onClick={() => onOpen(c)} className="fade-up press-fx" style={{ ...cardSt, textAlign: "left", cursor: "pointer", color: C.text, animationDelay: `${Math.min(i * 40, 280)}ms` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ width: 36, height: 36, borderRadius: "50%", background: C.jadeDim, color: C.jade, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14 }}>{c.name.slice(0, 1)}</span>
@@ -396,9 +560,9 @@ function CoachClientDetail({ client, onBack }) {
       </div>
       <div style={{ display: "flex", overflowX: "auto", borderBottom: `1px solid ${C.border}`, padding: "0 12px" }}>
         {tabs.map((t) => (
-          <button key={t.k} onClick={() => setTab(t.k)} style={{
+          <button key={t.k} onClick={() => setTab(t.k)} className="press-fx" style={{
             background: "none", border: "none", cursor: "pointer", padding: "10px 12px",
-            color: tab === t.k ? C.jade : C.muted, borderBottom: tab === t.k ? `2px solid ${C.jade}` : "2px solid transparent",
+            color: tab === t.k ? C.jadeBright : C.muted, borderBottom: tab === t.k ? `2px solid ${C.jadeBright}` : "2px solid transparent",
             fontSize: 13, fontWeight: tab === t.k ? 700 : 400, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5,
           }}><t.icon size={14} /> {t.label}</button>
         ))}
@@ -425,7 +589,7 @@ function OverviewPanel({ bodyLog, plans }) {
     <div>
       <div style={{ ...cardSt, marginBottom: 14 }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>体重 / 体脂趋势</div>
-        {chartData.length === 0 ? <EmptyState text="客户还没有体测记录" /> : (
+        {chartData.length === 0 ? <EmptyState text="客户还没有体测记录" icon={TrendingUp} /> : (
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={chartData} margin={{ top: 5, right: 6, left: -18, bottom: 0 }}>
               <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
@@ -448,18 +612,18 @@ function OverviewPanel({ bodyLog, plans }) {
             <div style={{ fontSize: 12, color: C.muted, marginTop: 4, whiteSpace: "pre-wrap" }}>{latestPlan.content}</div>
             <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>{fmtDate(latestPlan.date)}</div>
           </div>
-        ) : <EmptyState text="还未布置训练计划" />}
+        ) : <EmptyState text="还未布置训练计划" icon={ClipboardList} />}
       </div>
     </div>
   );
 }
 
 function DietListReadOnly({ log }) {
-  if (log.length === 0) return <EmptyState text="客户还没有记录饮食" />;
+  if (log.length === 0) return <EmptyState text="客户还没有记录饮食" icon={Utensils} />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {log.map((e) => (
-        <div key={e.id} style={cardSt}>
+      {log.map((e, i) => (
+        <div key={e.id} className="fade-up" style={{ ...cardSt, animationDelay: `${Math.min(i * 40, 280)}ms` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 12, color: C.muted }}>{fmtDate(e.date)} · {e.meal_type}</span>
             {e.is_trip && <TripBadge />}
@@ -472,11 +636,11 @@ function DietListReadOnly({ log }) {
   );
 }
 function TrainListReadOnly({ log }) {
-  if (log.length === 0) return <EmptyState text="客户还没有记录训练" />;
+  if (log.length === 0) return <EmptyState text="还没有训练记录" icon={Dumbbell} />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {log.map((e) => (
-        <div key={e.id} style={cardSt}>
+      {log.map((e, i) => (
+        <div key={e.id} className="fade-up" style={{ ...cardSt, animationDelay: `${Math.min(i * 40, 280)}ms` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 12, color: C.muted }}>{fmtDate(e.date)}</span>
             {e.is_trip && <TripBadge />}
@@ -502,7 +666,7 @@ function PlanPanel({ plans, onAdd, editable }) {
   return (
     <div>
       {editable && (
-        <button onClick={() => setShowForm((v) => !v)} style={{ ...btnPrimary, width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <button onClick={() => setShowForm((v) => !v)} className="press-fx" style={{ ...btnPrimary, width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
           <Plus size={16} /> 布置新的训练计划
         </button>
       )}
@@ -512,13 +676,13 @@ function PlanPanel({ plans, onAdd, editable }) {
           <input style={{ ...inputSt, marginBottom: 10 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：下肢力量 + 体态激活" />
           <label style={labelSt}>内容 / 动作安排</label>
           <textarea style={{ ...inputSt, minHeight: 90, marginBottom: 10, resize: "vertical" }} value={content} onChange={(e) => setContent(e.target.value)} placeholder="例如：&#10;1. 臀桥 3x15&#10;2. 靠墙天使式 3x10（改善圆肩）&#10;3. 农夫行走 4x30m" />
-          <button style={btnPrimary} onClick={submit}>保存计划</button>
+          <button className="press-fx" style={btnPrimary} onClick={submit}>保存计划</button>
         </div>
       )}
-      {plans.length === 0 ? <EmptyState text="还没有训练计划记录" /> : (
+      {plans.length === 0 ? <EmptyState text="还没有训练计划记录" icon={ClipboardList} /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {plans.map((p) => (
-            <div key={p.id} style={cardSt}>
+          {plans.map((p, i) => (
+            <div key={p.id} className="fade-up" style={{ ...cardSt, animationDelay: `${Math.min(i * 40, 280)}ms` }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div style={{ fontSize: 13, fontWeight: 700 }}>{p.title}</div>
                 <div style={{ fontSize: 11, color: C.muted }}>{fmtDate(p.date)}</div>
@@ -568,7 +732,7 @@ function PosturePanel({ posture, photos, editable, onSave, onAddPhoto }) {
           <textarea style={{ ...inputSt, minHeight: 80, resize: "vertical" }} value={suggestions} onChange={(e) => setSuggestions(e.target.value)} placeholder="例如：加强臀中肌激活，日常提醒收下巴、沉肩，办公室每小时起身活动…" />
         ) : (suggestions ? <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{suggestions}</div> : <EmptyState text="教练还未填写建议" />)}
         {editable && (
-          <button style={{ ...btnPrimary, marginTop: 10, display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }} onClick={handleSave}>
+          <button className="press-fx" style={{ ...btnPrimary, marginTop: 10, display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }} onClick={handleSave}>
             {saved ? <><Check size={15} /> 已保存</> : "保存评估与建议"}
           </button>
         )}
@@ -584,7 +748,7 @@ function PosturePanel({ posture, photos, editable, onSave, onAddPhoto }) {
             <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} disabled={uploading} />
           </label>
         </div>
-        {photos.length === 0 ? <EmptyState text="还没有体态照片" /> : (
+        {photos.length === 0 ? <EmptyState text="还没有体态照片" icon={ImagePlus} /> : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {photos.map((p) => (
               <div key={p.id} style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${C.border}` }}>
@@ -637,9 +801,23 @@ function ClientApp({ profile }) {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  async function addDiet(entry) { await supabase.from("diet_logs").insert({ user_id: profile.id, ...entry }); loadAll(); }
-  async function addBody(entry) { await supabase.from("body_logs").insert({ user_id: profile.id, ...entry }); loadAll(); }
-  async function addTrain(entry) { await supabase.from("train_logs").insert({ user_id: profile.id, ...entry }); loadAll(); }
+  const allDates = [...dietLog.map((e) => e.date), ...bodyLog.map((e) => e.date), ...trainLog.map((e) => e.date)];
+  const streak = computeStreak(allDates);
+  const activeDays = activeDaysThisWeek(allDates);
+  const [toast, fireCelebration] = useCelebration();
+
+  function celebrateAfter(prevStreak) {
+    const newStreak = computeStreak([...allDates, todayStr()]);
+    if (newStreak > prevStreak && [3, 7, 14, 30, 60, 100].includes(newStreak)) {
+      fireCelebration({ big: true, message: `连续打卡 ${newStreak} 天！你比昨天更强壮 🏆` });
+    } else {
+      fireCelebration();
+    }
+  }
+
+  async function addDiet(entry) { const s = streak; await supabase.from("diet_logs").insert({ user_id: profile.id, ...entry }); await loadAll(); celebrateAfter(s); }
+  async function addBody(entry) { const s = streak; await supabase.from("body_logs").insert({ user_id: profile.id, ...entry }); await loadAll(); celebrateAfter(s); }
+  async function addTrain(entry) { const s = streak; await supabase.from("train_logs").insert({ user_id: profile.id, ...entry }); await loadAll(); celebrateAfter(s); }
   async function addPhoto({ label, blob }) {
     const path = `${profile.id}/${uid()}.jpg`;
     await supabase.storage.from("posture-photos").upload(path, blob, { contentType: "image/jpeg" });
@@ -664,7 +842,7 @@ function ClientApp({ profile }) {
         <button onClick={() => supabase.auth.signOut()} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer" }}><LogOut size={19} /></button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: 18, paddingBottom: 90 }}>
-        {tab === "home" && <ClientHomeTab bodyLog={bodyLog} plans={plans} posture={posture} onGo={setTab} />}
+        {tab === "home" && <ClientHomeTab profile={profile} bodyLog={bodyLog} plans={plans} posture={posture} streak={streak} activeDays={activeDays} onGo={setTab} />}
         {tab === "diet" && <ClientDietTab log={dietLog} onAdd={addDiet} />}
         {tab === "body" && <ClientBodyTab log={bodyLog} onAdd={addBody} />}
         {tab === "train" && <ClientTrainTab log={trainLog} onAdd={addTrain} />}
@@ -672,21 +850,67 @@ function ClientApp({ profile }) {
       </div>
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: C.panel, borderTop: `1px solid ${C.border}`, padding: "8px 4px" }}>
         {tabs.map((t) => (
-          <button key={t.k} onClick={() => setTab(t.k)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer", padding: "6px 0", color: tab === t.k ? C.jade : C.muted, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontSize: 10 }}>
+          <button key={t.k} onClick={() => setTab(t.k)} className="press-fx" style={{ flex: 1, background: "none", border: "none", cursor: "pointer", padding: "6px 0", color: tab === t.k ? C.jadeBright : C.muted, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, fontSize: 10 }}>
             <t.icon size={18} /> {t.label}
           </button>
         ))}
       </div>
+      <CelebrationToast toast={toast} />
     </div>
   );
 }
 
-function ClientHomeTab({ bodyLog, plans, posture, onGo }) {
+function ClientHomeTab({ profile, bodyLog, plans, posture, streak, activeDays, onGo }) {
   const latestPlan = plans[0];
   const latest = bodyLog[0];
+  const prev = bodyLog[1];
+  const weightDelta = latest && prev ? +(latest.weight - prev.weight).toFixed(1) : null;
+  const bodyfatDelta = latest?.bodyfat != null && prev?.bodyfat != null ? +(latest.bodyfat - prev.bodyfat).toFixed(1) : null;
+  const weekMsg = activeDays >= 5 ? "状态火热，保持住！" : activeDays >= 1 ? "已经在路上，继续加油" : "今天就迈出第一步吧";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ ...cardSt, background: `linear-gradient(135deg, ${C.jadeDim}, ${C.panel})` }}>
+      <div className="fade-up" style={{
+        position: "relative", borderRadius: 20, padding: "22px 20px", overflow: "hidden",
+        background: `radial-gradient(120% 140% at 100% 0%, rgba(63,163,114,0.28), transparent 60%), radial-gradient(120% 140% at 0% 100%, rgba(201,161,90,0.20), transparent 55%), linear-gradient(160deg, ${C.panel}, ${C.bg})`,
+        border: `1px solid ${C.border}`,
+      }}>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{greetingWord()}，{profile.name}</div>
+        <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'Noto Serif SC', serif", lineHeight: 1.4 }}>{motivationalLine()}</div>
+        {streak > 0 && <div style={{ marginTop: 12 }}><StreakBadge days={streak} /></div>}
+      </div>
+
+      <div className="fade-up" style={{ ...cardSt, display: "flex", alignItems: "center", gap: 14, animationDelay: "60ms" }}>
+        <ActivityRing value={activeDays} total={7} size={50} color={C.jadeBright} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>本周活跃 {activeDays}/7 天</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{weekMsg}</div>
+        </div>
+        <Sparkles size={18} color={C.gold} />
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <div className="fade-up" style={{ ...cardSt, flex: 1, animationDelay: "100ms" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: C.muted }}>最新体重</div>
+            <TrendArrow delta={weightDelta} />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Roboto Mono', monospace", marginTop: 4, color: C.jadeBright }}>
+            {latest?.weight != null ? <AnimatedNumber value={latest.weight} decimals={1} /> : "--"}<span style={{ fontSize: 12, color: C.muted }}>kg</span>
+          </div>
+        </div>
+        <div className="fade-up" style={{ ...cardSt, flex: 1, animationDelay: "140ms" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: C.muted }}>最新体脂</div>
+            <TrendArrow delta={bodyfatDelta} />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Roboto Mono', monospace", marginTop: 4, color: C.goldBright }}>
+            {latest?.bodyfat != null ? <AnimatedNumber value={latest.bodyfat} decimals={1} /> : "--"}<span style={{ fontSize: 12, color: C.muted }}>%</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="fade-up" style={{ ...cardSt, background: `linear-gradient(135deg, ${C.jadeDim}, ${C.panel})`, animationDelay: "180ms" }}>
         <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>本次到店训练计划</div>
         {latestPlan ? (
           <>
@@ -695,26 +919,18 @@ function ClientHomeTab({ bodyLog, plans, posture, onGo }) {
           </>
         ) : <div style={{ fontSize: 13, color: C.muted }}>教练还未布置计划</div>}
       </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div style={{ ...cardSt, flex: 1 }}>
-          <div style={{ fontSize: 11, color: C.muted }}>最新体重</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'Roboto Mono', monospace" }}>{latest?.weight ?? "--"}<span style={{ fontSize: 12 }}>kg</span></div>
-        </div>
-        <div style={{ ...cardSt, flex: 1 }}>
-          <div style={{ fontSize: 11, color: C.muted }}>最新体脂</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'Roboto Mono', monospace" }}>{latest?.bodyfat ?? "--"}<span style={{ fontSize: 12 }}>%</span></div>
-        </div>
-      </div>
+
       {posture.suggestions && (
-        <div style={cardSt}>
+        <div className="fade-up" style={{ ...cardSt, animationDelay: "220ms" }}>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>体态调整建议</div>
           <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{posture.suggestions}</div>
         </div>
       )}
-      <div style={{ display: "flex", gap: 10 }}>
-        <button onClick={() => onGo("diet")} style={{ ...btnGhost, flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 12 }}><Utensils size={18} color={C.jade} /> 记饮食</button>
-        <button onClick={() => onGo("body")} style={{ ...btnGhost, flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 12 }}><Scale size={18} color={C.gold} /> 记体测</button>
-        <button onClick={() => onGo("train")} style={{ ...btnGhost, flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 12 }}><Dumbbell size={18} color={C.coral} /> 记训练</button>
+
+      <div className="fade-up" style={{ display: "flex", gap: 10, animationDelay: "260ms" }}>
+        <button onClick={() => onGo("diet")} className="press-fx" style={{ ...btnGhost, flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 12 }}><Utensils size={18} color={C.jadeBright} /> 记饮食</button>
+        <button onClick={() => onGo("body")} className="press-fx" style={{ ...btnGhost, flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 12 }}><Scale size={18} color={C.goldBright} /> 记体测</button>
+        <button onClick={() => onGo("train")} className="press-fx" style={{ ...btnGhost, flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 12 }}><Dumbbell size={18} color={C.coral} /> 记训练</button>
       </div>
     </div>
   );
@@ -744,12 +960,12 @@ function ClientDietTab({ log, onAdd }) {
           <input type="checkbox" checked={isTrip} onChange={(e) => setIsTrip(e.target.checked)} /> <Plane size={13} /> 出差/在外地
         </label>
         {isTrip && <input style={{ ...inputSt, marginBottom: 10 }} value={tripLocation} onChange={(e) => setTripLocation(e.target.value)} placeholder="所在城市/地点" />}
-        <button style={btnPrimary} onClick={submit}>保存记录</button>
+        <button className="press-fx" style={btnPrimary} onClick={submit}>保存记录</button>
       </div>
-      {log.length === 0 ? <EmptyState text="还没有饮食记录" /> : (
+      {log.length === 0 ? <EmptyState text="还没有饮食记录，记下第一餐吧" icon={Utensils} /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {log.map((e) => (
-            <div key={e.id} style={cardSt}>
+          {log.map((e, i) => (
+            <div key={e.id} className="fade-up" style={{ ...cardSt, animationDelay: `${Math.min(i * 40, 280)}ms` }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 12, color: C.muted }}>{fmtDate(e.date)} · {e.meal_type}</span>
                 {e.is_trip && <TripBadge />}
@@ -787,11 +1003,11 @@ function ClientBodyTab({ log, onAdd }) {
             <input style={inputSt} value={bodyfat} inputMode="decimal" onChange={(e) => setBodyfat(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="18.5" />
           </div>
         </div>
-        <button style={btnPrimary} onClick={submit}>保存记录</button>
+        <button className="press-fx" style={btnPrimary} onClick={submit}>保存记录</button>
       </div>
       <div style={{ ...cardSt, marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>趋势</div>
-        {chartData.length === 0 ? <EmptyState text="还没有记录" /> : (
+        {chartData.length === 0 ? <EmptyState text="还没有记录，记下第一次体测吧" icon={Scale} /> : (
           <ResponsiveContainer width="100%" height={190}>
             <LineChart data={chartData} margin={{ top: 5, right: 6, left: -18, bottom: 0 }}>
               <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
@@ -808,8 +1024,8 @@ function ClientBodyTab({ log, onAdd }) {
       </div>
       {log.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {log.map((e) => (
-            <div key={e.id} style={{ ...cardSt, padding: 12, display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+          {log.map((e, i) => (
+            <div key={e.id} className="fade-up" style={{ ...cardSt, padding: 12, display: "flex", justifyContent: "space-between", fontSize: 13, animationDelay: `${Math.min(i * 40, 280)}ms` }}>
               <span style={{ color: C.muted }}>{fmtDate(e.date)}</span>
               <span style={{ fontFamily: "'Roboto Mono', monospace" }}>{e.weight}kg{e.bodyfat != null ? ` · ${e.bodyfat}%` : ""}</span>
             </div>
@@ -845,7 +1061,7 @@ function ClientTrainTab({ log, onAdd }) {
           <input type="checkbox" checked={isTrip} onChange={(e) => setIsTrip(e.target.checked)} /> <Plane size={13} /> 出差期间训练
         </label>
         {isTrip && <input style={{ ...inputSt, marginBottom: 10 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="所在城市/地点" />}
-        <button style={btnPrimary} onClick={submit}>保存记录</button>
+        <button className="press-fx" style={btnPrimary} onClick={submit}>保存记录</button>
       </div>
       <TrainListReadOnly log={log} />
     </div>
