@@ -1,0 +1,10 @@
+{
+  "name": "正位 ALIGN · 私教客户管理",
+  "short_name": "正位 ALIGN",
+  "description": "教练与客户的饮食、体测、训练、体态一站式记录",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#12171B",
+  "theme_color": "#12171B",
+  "orientation": "portrait"
+}
