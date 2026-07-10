@@ -29,6 +29,38 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d) => { if (!d) return ""; const [, m, day] = d.split("-"); return `${m}/${day}`; };
 
+/* ---------------- 预约添加到手机日历（.ics） ---------------- */
+function downloadAppointmentIcs(appt) {
+  const start = new Date(`${appt.requested_date}T${appt.requested_time}:00`);
+  const end = new Date(start.getTime() + 60 * 60000);
+  const fmtIcsDate = (d) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  const escapeIcs = (s) => (s || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+  const lines = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//JE Fitness//Appointment//CN",
+    "BEGIN:VEVENT",
+    `UID:${appt.id}@je-fitness-app`,
+    `DTSTAMP:${fmtIcsDate(new Date())}`,
+    `DTSTART:${fmtIcsDate(start)}`,
+    `DTEND:${fmtIcsDate(end)}`,
+    "SUMMARY:律动 PULSE 训练课",
+    appt.note ? `DESCRIPTION:${escapeIcs(appt.note)}` : null,
+    "END:VEVENT", "END:VCALENDAR",
+  ].filter(Boolean);
+  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `训练课-${appt.requested_date}.ics`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function AddToCalendarButton({ appt }) {
+  return (
+    <button className="press-fx" onClick={() => downloadAppointmentIcs(appt)} style={{ ...btnGhost, fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}>
+      <CalendarDays size={13} /> 添加到日历
+    </button>
+  );
+}
+
 /* ---------------- 动力小工具：连续打卡 / 本周活跃 / 数字滚动 ---------------- */
 function computeStreak(dateStrs) {
   const days = new Set(dateStrs.filter(Boolean));
@@ -1171,13 +1203,15 @@ function statusBadge(status) {
   return <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 20, background: s.bg, color: s.color, whiteSpace: "nowrap" }}>{s.label}</span>;
 }
 
-function ClientBookingScreen({ profile, onBack }) {
+function ClientBookingScreen({ profile, coaches, onBack }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [note, setNote] = useState("");
+  const [coachId, setCoachId] = useState("");
   const [busy, setBusy] = useState(false);
+  const coachMap = Object.fromEntries((coaches || []).map((c) => [c.id, c.name]));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1192,8 +1226,8 @@ function ClientBookingScreen({ profile, onBack }) {
   async function submit() {
     if (!date || !time) return;
     setBusy(true);
-    await supabase.from("appointments").insert({ client_id: profile.id, requested_date: date, requested_time: time, note: note.trim() || null, status: "pending" });
-    setDate(""); setTime(""); setNote("");
+    await supabase.from("appointments").insert({ client_id: profile.id, coach_id: coachId || null, requested_date: date, requested_time: time, note: note.trim() || null, status: "pending" });
+    setDate(""); setTime(""); setNote(""); setCoachId("");
     setBusy(false);
     load();
   }
@@ -1221,6 +1255,15 @@ function ClientBookingScreen({ profile, onBack }) {
               <input type="time" style={inputSt} value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
           </div>
+          {coaches?.length > 0 && (
+            <>
+              <label style={labelSt}>选择教练（可选）</label>
+              <select style={{ ...inputSt, marginBottom: 10 }} value={coachId} onChange={(e) => setCoachId(e.target.value)}>
+                <option value="">不指定</option>
+                {coaches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </>
+          )}
           <label style={labelSt}>备注（可选）</label>
           <textarea style={{ ...inputSt, minHeight: 60, marginBottom: 10, resize: "vertical" }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="想练的部位/特殊情况…" />
           <button className="press-fx" style={btnPrimary} onClick={submit} disabled={busy || !date || !time}>{busy ? "提交中…" : "提交预约申请"}</button>
@@ -1233,10 +1276,14 @@ function ClientBookingScreen({ profile, onBack }) {
                   <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtDate(a.requested_date)} {a.requested_time}</div>
                   {statusBadge(a.status)}
                 </div>
+                {a.coach_id && coachMap[a.coach_id] && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>教练：{coachMap[a.coach_id]}</div>}
                 {a.note && <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>{a.note}</div>}
                 {a.coach_note && <div style={{ fontSize: 12, color: C.gold, marginTop: 4 }}>教练回复：{a.coach_note}</div>}
                 {(a.status === "pending" || a.status === "confirmed") && (
-                  <button className="press-fx" onClick={() => cancel(a.id)} style={{ ...btnGhost, marginTop: 10, fontSize: 12, padding: "6px 12px" }}>取消预约</button>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    {a.status === "confirmed" && <AddToCalendarButton appt={a} />}
+                    <button className="press-fx" onClick={() => cancel(a.id)} style={{ ...btnGhost, fontSize: 12, padding: "6px 12px" }}>取消预约</button>
+                  </div>
                 )}
               </div>
             ))}
@@ -1274,9 +1321,10 @@ function AppointmentCoachRow({ a, onRespond }) {
         </div>
       )}
       {a.status === "confirmed" && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
           <button className="press-fx" style={{ ...btnPrimary, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => onRespond(a.id, "completed")}>标记已完成</button>
           <button className="press-fx" style={{ ...btnGhost, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => onRespond(a.id, "cancelled")}>取消</button>
+          <AddToCalendarButton appt={a} />
         </div>
       )}
     </div>
@@ -1520,7 +1568,7 @@ function ClientApp({ profile }) {
     return <ChatScreen clientId={profile.id} myRole="client" onBack={() => { setScreen("tabs"); loadAll(); }} />;
   }
   if (screen === "booking") {
-    return <ClientBookingScreen profile={profile} onBack={() => { setScreen("tabs"); loadAll(); }} />;
+    return <ClientBookingScreen profile={profile} coaches={coaches} onBack={() => { setScreen("tabs"); loadAll(); }} />;
   }
 
   return (
