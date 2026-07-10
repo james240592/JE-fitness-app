@@ -30,11 +30,12 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (d) => { if (!d) return ""; const [, m, day] = d.split("-"); return `${m}/${day}`; };
 
 /* ---------------- 预约添加到手机日历（.ics） ---------------- */
-function downloadAppointmentIcs(appt) {
+function downloadAppointmentIcs(appt, clientName) {
   const start = new Date(`${appt.requested_date}T${appt.requested_time}:00`);
   const end = new Date(start.getTime() + 60 * 60000);
   const fmtIcsDate = (d) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
   const escapeIcs = (s) => (s || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+  const summary = clientName ? `律动 PULSE 训练课 · ${clientName}` : "律动 PULSE 训练课";
   const lines = [
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//JE Fitness//Appointment//CN",
     "BEGIN:VEVENT",
@@ -42,7 +43,7 @@ function downloadAppointmentIcs(appt) {
     `DTSTAMP:${fmtIcsDate(new Date())}`,
     `DTSTART:${fmtIcsDate(start)}`,
     `DTEND:${fmtIcsDate(end)}`,
-    "SUMMARY:律动 PULSE 训练课",
+    `SUMMARY:${escapeIcs(summary)}`,
     appt.note ? `DESCRIPTION:${escapeIcs(appt.note)}` : null,
     "END:VEVENT", "END:VCALENDAR",
   ].filter(Boolean);
@@ -53,9 +54,9 @@ function downloadAppointmentIcs(appt) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
-function AddToCalendarButton({ appt }) {
+function AddToCalendarButton({ appt, clientName }) {
   return (
-    <button className="press-fx" onClick={() => downloadAppointmentIcs(appt)} style={{ ...btnGhost, fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}>
+    <button className="press-fx" onClick={() => downloadAppointmentIcs(appt, clientName)} style={{ ...btnGhost, fontSize: 12, padding: "6px 12px", display: "flex", alignItems: "center", gap: 5 }}>
       <CalendarDays size={13} /> 添加到日历
     </button>
   );
@@ -1281,7 +1282,7 @@ function ClientBookingScreen({ profile, coaches, onBack }) {
                 {a.coach_note && <div style={{ fontSize: 12, color: C.gold, marginTop: 4 }}>教练回复：{a.coach_note}</div>}
                 {(a.status === "pending" || a.status === "confirmed") && (
                   <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                    {a.status === "confirmed" && <AddToCalendarButton appt={a} />}
+                    {a.status === "confirmed" && <AddToCalendarButton appt={a} clientName={profile.name} />}
                     <button className="press-fx" onClick={() => cancel(a.id)} style={{ ...btnGhost, fontSize: 12, padding: "6px 12px" }}>取消预约</button>
                   </div>
                 )}
@@ -1294,7 +1295,7 @@ function ClientBookingScreen({ profile, coaches, onBack }) {
   );
 }
 
-function AppointmentCoachRow({ a, onRespond }) {
+function AppointmentCoachRow({ a, onRespond, clientName }) {
   const [replyNote, setReplyNote] = useState("");
   const [showDecline, setShowDecline] = useState(false);
   return (
@@ -1324,7 +1325,7 @@ function AppointmentCoachRow({ a, onRespond }) {
         <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
           <button className="press-fx" style={{ ...btnPrimary, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => onRespond(a.id, "completed")}>标记已完成</button>
           <button className="press-fx" style={{ ...btnGhost, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => onRespond(a.id, "cancelled")}>取消</button>
-          <AddToCalendarButton appt={a} />
+          <AddToCalendarButton appt={a} clientName={clientName} />
         </div>
       )}
     </div>
@@ -1380,7 +1381,7 @@ function CoachAppointmentsPanel({ client }) {
       </div>
       {loading ? <CenterLoader /> : list.length === 0 ? <EmptyState text="还没有预约记录" icon={CalendarDays} /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {list.map((a) => <AppointmentCoachRow key={a.id} a={a} onRespond={respond} />)}
+          {list.map((a) => <AppointmentCoachRow key={a.id} a={a} onRespond={respond} clientName={client.name} />)}
         </div>
       )}
     </div>
