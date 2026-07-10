@@ -9,6 +9,7 @@ import {
   MessageCircle, Send, CalendarDays, Ticket, Undo2, Trash2, AlertTriangle,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
+import { estimateNutrition } from "./nutritionEstimate";
 
 /* ---------------- 视觉设定 ---------------- */
 const C = {
@@ -273,6 +274,17 @@ function EmptyState({ text, icon: Icon }) {
 }
 function TripBadge() {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: C.jadeDim, color: C.jade, fontSize: 11, padding: "2px 8px", borderRadius: 20 }}><Plane size={11} /> 出差</span>;
+}
+function NutritionBadge({ e }) {
+  if (e.estimated_calories == null && e.estimated_protein == null && e.estimated_fat == null && e.estimated_carbs == null) return null;
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6, fontSize: 11, color: C.muted, fontFamily: "'Roboto Mono', monospace" }}>
+      {e.estimated_calories != null && <span>🔥 {e.estimated_calories}kcal</span>}
+      {e.estimated_protein != null && <span>蛋白 {e.estimated_protein}g</span>}
+      {e.estimated_fat != null && <span>脂肪 {e.estimated_fat}g</span>}
+      {e.estimated_carbs != null && <span>碳水 {e.estimated_carbs}g</span>}
+    </div>
+  );
 }
 
 /* ---------------- 顶层 App：登录状态管理 ---------------- */
@@ -872,13 +884,14 @@ function DietListReadOnly({ log }) {
           </div>
           <div style={{ fontSize: 13, marginTop: 6 }}>{e.description}</div>
           {e.is_trip && e.trip_location && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>📍 {e.trip_location}</div>}
+          <NutritionBadge e={e} />
         </div>
       ))}
     </div>
   );
 }
-function TrainListReadOnly({ log }) {
-  if (log.length === 0) return <EmptyState text="还没有训练记录" icon={Dumbbell} />;
+function TrainListReadOnly({ log, emptyText = "还没有训练记录" }) {
+  if (log.length === 0) return <EmptyState text={emptyText} icon={Dumbbell} />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {log.map((e, i) => (
@@ -979,9 +992,8 @@ function PosturePanel({ posture, photos, editable, onSave, onAddPhoto }) {
           </button>
         )}
       </div>
-      <PostureCompareCard photos={photos} />
       <div style={cardSt}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>体态照片对比</div>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>体态照片</div>
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           {["正面", "侧面", "背面"].map((l) => (
             <button key={l} onClick={() => setLabel(l)} style={{ background: label === l ? C.jadeDim : "transparent", color: label === l ? C.jade : C.muted, border: `1px solid ${C.border}`, borderRadius: 20, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>{l}</button>
@@ -991,9 +1003,10 @@ function PosturePanel({ posture, photos, editable, onSave, onAddPhoto }) {
             <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} disabled={uploading} />
           </label>
         </div>
-        {photos.length === 0 ? <EmptyState text="还没有体态照片" icon={ImagePlus} /> : (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {photos.map((p) => (
+        <PostureCompareCard photos={photos} label={label} />
+        {photos.filter((p) => p.label === label).length === 0 ? <EmptyState text="还没有体态照片，上传第一张吧" icon={ImagePlus} /> : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
+            {photos.filter((p) => p.label === label).map((p) => (
               <div key={p.id} style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${C.border}` }}>
                 {p.url && <img src={p.url} alt={p.label} style={{ width: "100%", height: 130, objectFit: "cover", display: "block" }} />}
                 <div style={{ padding: "5px 8px", fontSize: 11, color: C.muted, display: "flex", justifyContent: "space-between" }}>
@@ -1010,8 +1023,7 @@ function PosturePanel({ posture, photos, editable, onSave, onAddPhoto }) {
 }
 
 /* ---------------- 体态变化滑动对比 ---------------- */
-function PostureCompareCard({ photos }) {
-  const [label, setLabel] = useState("正面");
+function PostureCompareCard({ photos, label }) {
   const [beforeId, setBeforeId] = useState("");
   const [afterId, setAfterId] = useState("");
   const [pct, setPct] = useState(50);
@@ -1042,18 +1054,17 @@ function PostureCompareCard({ photos }) {
   function onMove(e) { if (draggingRef.current) updatePct(e.touches ? e.touches[0].clientX : e.clientX); }
   function onUp() { draggingRef.current = false; }
 
-  return (
-    <div style={{ ...cardSt, marginBottom: 14 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>体态变化对比</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        {["正面", "侧面", "背面"].map((l) => (
-          <button key={l} onClick={() => setLabel(l)} style={{ background: label === l ? C.jadeDim : "transparent", color: label === l ? C.jade : C.muted, border: `1px solid ${C.border}`, borderRadius: 20, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>{l}</button>
-        ))}
+  if (group.length < 2) {
+    return (
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>
+        {label}角度还没有两张以上照片，先多拍几次再来对比吧
       </div>
-      {group.length < 2 ? (
-        <EmptyState text={`${label}角度还没有两张以上照片，先多拍几次再来对比吧`} icon={Ruler} />
-      ) : (
-        <>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>拖动滑块查看 {label} 角度的变化对比</div>
           <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
             <div style={{ flex: 1 }}>
               <label style={labelSt}>之前</label>
@@ -1085,8 +1096,6 @@ function PostureCompareCard({ photos }) {
             <span style={{ position: "absolute", left: 8, bottom: 8, fontSize: 10, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 6px", borderRadius: 6 }}>之前</span>
             <span style={{ position: "absolute", right: 8, bottom: 8, fontSize: 10, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 6px", borderRadius: 6 }}>之后</span>
           </div>
-        </>
-      )}
     </div>
   );
 }
@@ -1492,11 +1501,12 @@ function ClientApp({ profile }) {
   const [packages, setPackages] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [coaches, setCoaches] = useState([]);
+  const [foods, setFoods] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [{ data: d }, { data: b }, { data: t }, { data: p }, { data: pos }, { data: ph }, { data: ap }, { data: pk }, { data: unread }, { data: coachRels }] = await Promise.all([
+    const [{ data: d }, { data: b }, { data: t }, { data: p }, { data: pos }, { data: ph }, { data: ap }, { data: pk }, { data: unread }, { data: coachRels }, { data: foodRows }] = await Promise.all([
       supabase.from("diet_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
       supabase.from("body_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
       supabase.from("train_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
@@ -1507,7 +1517,9 @@ function ClientApp({ profile }) {
       supabase.from("session_packages").select("*").eq("client_id", profile.id),
       supabase.from("messages").select("id").eq("client_id", profile.id).eq("read_by_client", false),
       supabase.from("client_coaches").select("coach_id").eq("client_id", profile.id),
+      supabase.from("foods").select("*"),
     ]);
+    setFoods(foodRows || []);
     setDietLog(d || []); setBodyLog(b || []); setTrainLog(t || []); setPlans(p || []);
     setPosture(pos || { assessment: "", suggestions: "" });
     setAppointments(ap || []); setPackages(pk || []); setUnreadCount((unread || []).length);
@@ -1592,7 +1604,7 @@ function ClientApp({ profile }) {
             onOpenBooking={() => setScreen("booking")}
           />
         )}
-        {tab === "diet" && <ClientDietTab log={dietLog} onAdd={addDiet} />}
+        {tab === "diet" && <ClientDietTab log={dietLog} onAdd={addDiet} foods={foods} />}
         {tab === "body" && <ClientBodyTab log={bodyLog} onAdd={addBody} />}
         {tab === "train" && <ClientTrainTab log={trainLog} onAdd={addTrain} coaches={coaches} />}
         {tab === "posture" && <PosturePanel posture={posture} photos={photos} editable={false} onAddPhoto={addPhoto} />}
@@ -1713,15 +1725,52 @@ function ClientHomeTab({ profile, bodyLog, plans, posture, streak, activeDays, o
   );
 }
 
-function ClientDietTab({ log, onAdd }) {
+function ClientDietTab({ log, onAdd, foods }) {
   const [mealType, setMealType] = useState("早餐");
   const [desc, setDesc] = useState("");
   const [isTrip, setIsTrip] = useState(false);
   const [tripLocation, setTripLocation] = useState("");
+  const [calories, setCalories] = useState("");
+  const [protein, setProtein] = useState("");
+  const [fat, setFat] = useState("");
+  const [carbs, setCarbs] = useState("");
+  const [estimateNote, setEstimateNote] = useState("");
+  const lastAutoRef = useRef({ calories: "", protein: "", fat: "", carbs: "" });
+
+  useEffect(() => {
+    if (!desc.trim() || !foods?.length) { setEstimateNote(""); return; }
+    const timer = setTimeout(() => {
+      const { matched, unmatchedFoods, totals } = estimateNutrition(desc, foods);
+      const auto = lastAutoRef.current;
+      if (!totals) {
+        setEstimateNote(unmatchedFoods.length > 0 || matched.length === 0 ? "这次没识别出来，可以手动填一下营养数据" : "");
+        return;
+      }
+      // 只覆盖“还没被手动改过”的字段，避免打断学员自己的修改
+      if (calories === "" || calories === auto.calories) { setCalories(String(totals.calories)); auto.calories = String(totals.calories); }
+      if (protein === "" || protein === auto.protein) { setProtein(String(totals.protein)); auto.protein = String(totals.protein); }
+      if (fat === "" || fat === auto.fat) { setFat(String(totals.fat)); auto.fat = String(totals.fat); }
+      if (carbs === "" || carbs === auto.carbs) { setCarbs(String(totals.carbs)); auto.carbs = String(totals.carbs); }
+      const names = matched.map((m) => m.food.name);
+      let note = `已按 ${names.join("、")} 自动估算，可手动调整`;
+      if (unmatchedFoods.length > 0) note += `（${unmatchedFoods.map((f) => f.name).join("、")} 没识别到分量，未计入）`;
+      setEstimateNote(note);
+    }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desc, foods]);
+
   function submit() {
     if (!desc.trim()) return;
-    onAdd({ date: todayStr(), meal_type: mealType, description: desc.trim(), is_trip: isTrip, trip_location: isTrip ? tripLocation.trim() : null });
-    setDesc(""); setTripLocation("");
+    onAdd({
+      date: todayStr(), meal_type: mealType, description: desc.trim(), is_trip: isTrip, trip_location: isTrip ? tripLocation.trim() : null,
+      estimated_calories: calories !== "" ? parseFloat(calories) : null,
+      estimated_protein: protein !== "" ? parseFloat(protein) : null,
+      estimated_fat: fat !== "" ? parseFloat(fat) : null,
+      estimated_carbs: carbs !== "" ? parseFloat(carbs) : null,
+    });
+    setDesc(""); setTripLocation(""); setCalories(""); setProtein(""); setFat(""); setCarbs(""); setEstimateNote("");
+    lastAutoRef.current = { calories: "", protein: "", fat: "", carbs: "" };
   }
   return (
     <div>
@@ -1733,6 +1782,25 @@ function ClientDietTab({ log, onAdd }) {
           ))}
         </div>
         <textarea style={{ ...inputSt, minHeight: 70, marginBottom: 10, resize: "vertical" }} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="吃了什么？大致分量？例如：鸡胸肉150g+糙米一碗+西兰花" />
+        {estimateNote && <div style={{ fontSize: 11, color: C.muted, marginBottom: 10, lineHeight: 1.5 }}>{estimateNote}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <label style={labelSt}>热量 (kcal)</label>
+            <input style={inputSt} value={calories} inputMode="decimal" onChange={(e) => setCalories(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="自动估算或手动填写" />
+          </div>
+          <div>
+            <label style={labelSt}>蛋白质 (g)</label>
+            <input style={inputSt} value={protein} inputMode="decimal" onChange={(e) => setProtein(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="—" />
+          </div>
+          <div>
+            <label style={labelSt}>脂肪 (g)</label>
+            <input style={inputSt} value={fat} inputMode="decimal" onChange={(e) => setFat(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="—" />
+          </div>
+          <div>
+            <label style={labelSt}>碳水 (g)</label>
+            <input style={inputSt} value={carbs} inputMode="decimal" onChange={(e) => setCarbs(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="—" />
+          </div>
+        </div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.muted, marginBottom: 10 }}>
           <input type="checkbox" checked={isTrip} onChange={(e) => setIsTrip(e.target.checked)} /> <Plane size={13} /> 出差/在外地
         </label>
@@ -1748,6 +1816,7 @@ function ClientDietTab({ log, onAdd }) {
                 {e.is_trip && <TripBadge />}
               </div>
               <div style={{ fontSize: 13, marginTop: 6 }}>{e.description}</div>
+              <NutritionBadge e={e} />
             </div>
           ))}
         </div>
@@ -1784,7 +1853,7 @@ function ClientBodyTab({ log, onAdd }) {
       </div>
       <div style={{ ...cardSt, marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>趋势</div>
-        {chartData.length === 0 ? <EmptyState text="还没有记录，记下第一次体测吧" icon={Scale} /> : (
+        {chartData.length === 0 ? <EmptyState text="还没有体测记录，记下第一次吧" icon={Scale} /> : (
           <ResponsiveContainer width="100%" height={190}>
             <LineChart data={chartData} margin={{ top: 5, right: 6, left: -18, bottom: 0 }}>
               <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
@@ -1850,7 +1919,7 @@ function ClientTrainTab({ log, onAdd, coaches }) {
         {isTrip && <input style={{ ...inputSt, marginBottom: 10 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="所在城市/地点" />}
         <button className="press-fx" style={btnPrimary} onClick={submit}>保存记录</button>
       </div>
-      <TrainListReadOnly log={log} />
+      <TrainListReadOnly log={log} emptyText="还没有训练记录，记下第一次吧" />
     </div>
   );
 }
