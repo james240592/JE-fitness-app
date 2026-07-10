@@ -6,7 +6,7 @@ import {
   Users, User, Utensils, Scale, Dumbbell, ClipboardList, LogOut, Plus,
   Plane, TrendingUp, TrendingDown, Minus, ChevronRight, X, Check,
   ArrowLeft, Loader2, ImagePlus, Home, Ruler, Mail, Lock, Flame, Sparkles, Trophy,
-  MessageCircle, Send, CalendarDays, Ticket, Undo2,
+  MessageCircle, Send, CalendarDays, Ticket, Undo2, Trash2, AlertTriangle,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -417,11 +417,15 @@ function CoachApp({ profile }) {
 
   const loadClients = useCallback(async () => {
     setLoading(true);
-    const [{ data: cl }, { data: unread }, { data: pending }] = await Promise.all([
-      supabase.from("profiles").select("*").eq("role", "client").order("name"),
+    const [{ data: rels }, { data: unread }, { data: pending }] = await Promise.all([
+      supabase.from("client_coaches").select("client_id").eq("coach_id", profile.id),
       supabase.from("messages").select("client_id").eq("read_by_coach", false),
       supabase.from("appointments").select("client_id").eq("status", "pending"),
     ]);
+    const clientIds = (rels || []).map((r) => r.client_id);
+    const { data: cl } = clientIds.length
+      ? await supabase.from("profiles").select("*").in("id", clientIds).order("name")
+      : { data: [] };
     setClients(cl || []);
     const unreadCounts = {};
     (unread || []).forEach((m) => { unreadCounts[m.client_id] = (unreadCounts[m.client_id] || 0) + 1; });
@@ -441,7 +445,7 @@ function CoachApp({ profile }) {
     }));
     setSummaries(sums);
     setLoading(false);
-  }, []);
+  }, [profile.id]);
 
   useEffect(() => { loadClients(); }, [loadClients]);
 
@@ -455,7 +459,7 @@ function CoachApp({ profile }) {
         />
       )}
       {screen === "client" && (
-        <CoachClientDetail client={selected} onBack={() => { setScreen("home"); loadClients(); }} />
+        <CoachClientDetail client={selected} coachProfile={profile} onBack={() => { setScreen("home"); loadClients(); }} />
       )}
     </>
   );
@@ -509,7 +513,7 @@ function CoachHome({ clients, summaries, loading, onOpen, onLogout }) {
   );
 }
 
-function CoachClientDetail({ client, onBack }) {
+function CoachClientDetail({ client, coachProfile, onBack }) {
   const [tab, setTab] = useState("overview");
   const [dietLog, setDietLog] = useState([]);
   const [bodyLog, setBodyLog] = useState([]);
@@ -518,6 +522,7 @@ function CoachClientDetail({ client, onBack }) {
   const [posture, setPosture] = useState({ assessment: "", suggestions: "" });
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showDelete, setShowDelete] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -573,9 +578,20 @@ function CoachClientDetail({ client, onBack }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       <div style={{ padding: "16px 20px 10px", borderBottom: `1px solid ${C.border}` }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer", marginBottom: 8 }}><ArrowLeft size={16} /> 返回客户列表</button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}><ArrowLeft size={16} /> 返回客户列表</button>
+          <button onClick={() => setShowDelete(true)} style={{ background: "none", border: "none", color: C.coral, display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12 }}><Trash2 size={14} /> 删除该学员</button>
+        </div>
         <div style={{ fontSize: 18, fontWeight: 700 }}>{client.name}</div>
       </div>
+      {showDelete && (
+        <DeleteClientModal
+          client={client}
+          coachProfile={coachProfile}
+          onClose={() => setShowDelete(false)}
+          onDone={() => { setShowDelete(false); onBack(); }}
+        />
+      )}
       <div style={{ display: "flex", overflowX: "auto", borderBottom: `1px solid ${C.border}`, padding: "0 12px" }}>
         {tabs.map((t) => (
           <button key={t.k} onClick={() => setTab(t.k)} className="press-fx" style={{
@@ -596,6 +612,178 @@ function CoachClientDetail({ client, onBack }) {
         {tab === "chat" && <ChatScreen clientId={client.id} myRole="coach" embedded />}
       </div>
     </div>
+  );
+}
+
+const DELETE_DATA_TABLES = [
+  { table: "diet_logs", col: "user_id", label: "饮食记录" },
+  { table: "body_logs", col: "user_id", label: "体测记录" },
+  { table: "train_logs", col: "user_id", label: "训练记录" },
+  { table: "plans", col: "client_id", label: "训练计划" },
+  { table: "posture_photos", col: "client_id", label: "体态照片" },
+  { table: "messages", col: "client_id", label: "聊天消息" },
+  { table: "appointments", col: "client_id", label: "预约记录" },
+  { table: "session_packages", col: "client_id", label: "课时包" },
+];
+
+function ModalShell({ children, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }} onClick={onClose}>
+      <div style={{ ...cardSt, maxWidth: 420, width: "100%", maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function DeleteClientModal({ client, coachProfile, onClose, onDone }) {
+  const [stage, setStage] = useState("loading"); // loading | choose | confirmRemove | confirmDelete | working | error
+  const [otherCoaches, setOtherCoaches] = useState([]);
+  const [counts, setCounts] = useState([]);
+  const [ack, setAck] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const { data: rels } = await supabase.from("client_coaches").select("coach_id").eq("client_id", client.id);
+      const coachIds = (rels || []).map((r) => r.coach_id).filter((id) => id !== coachProfile.id);
+      let others = [];
+      if (coachIds.length > 0) {
+        const { data: coachProfiles } = await supabase.from("profiles").select("id,name").in("id", coachIds);
+        others = coachProfiles || [];
+      }
+      setOtherCoaches(others);
+      setStage(others.length > 0 ? "choose" : "confirmDelete");
+    })();
+  }, [client.id, coachProfile.id]);
+
+  async function loadCounts() {
+    const results = await Promise.all(DELETE_DATA_TABLES.map(async ({ table, col, label }) => {
+      const { count } = await supabase.from(table).select("*", { count: "exact", head: true }).eq(col, client.id);
+      return { label, count: count || 0 };
+    }));
+    setCounts(results);
+  }
+
+  useEffect(() => {
+    if (stage === "confirmDelete") loadCounts();
+  }, [stage]);
+
+  async function handleRemove() {
+    setStage("working");
+    const { error } = await supabase.from("client_coaches").delete().eq("client_id", client.id).eq("coach_id", coachProfile.id);
+    if (error) { setErrMsg(error.message); setStage("error"); return; }
+    onDone();
+  }
+
+  async function handleFullDelete() {
+    setStage("working");
+    const { data: photoRows } = await supabase.from("posture_photos").select("image_path").eq("client_id", client.id);
+    const paths = (photoRows || []).map((p) => p.image_path).filter(Boolean);
+    if (paths.length > 0) {
+      await supabase.storage.from("posture-photos").remove(paths);
+    }
+    const { error } = await supabase.rpc("delete_client_account", { p_client_id: client.id });
+    if (error) { setErrMsg(error.message); setStage("error"); return; }
+    onDone();
+  }
+
+  return (
+    <ModalShell onClose={stage === "working" ? undefined : onClose}>
+      {stage === "loading" && (
+        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}><Loader2 className="spin" size={20} /></div>
+      )}
+
+      {stage === "choose" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: C.coral }}>
+            <AlertTriangle size={18} />
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{client.name} 由多位教练共同带教</div>
+          </div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 16, lineHeight: 1.6 }}>
+            这位学员目前也归属于 {otherCoaches.map((c) => c.name).join("、")}。请选择你要做的操作：
+          </div>
+          <button className="press-fx" style={{ ...btnGhost, width: "100%", marginBottom: 10, textAlign: "left" }} onClick={() => setStage("confirmRemove")}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>从我的客户列表移除</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>学员仍归属于其他教练，数据不受影响</div>
+          </button>
+          <button className="press-fx" style={{ ...btnGhost, width: "100%", marginBottom: 10, textAlign: "left", borderColor: C.coral, color: C.coral }} onClick={() => setStage("confirmDelete")}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>彻底删除这个学员账号</div>
+            <div style={{ fontSize: 11, marginTop: 3 }}>账号和全部数据永久清除，对所有教练都不可见</div>
+          </button>
+          <button className="press-fx" style={{ ...btnGhost, width: "100%" }} onClick={onClose}>取消</button>
+        </div>
+      )}
+
+      {stage === "confirmRemove" && (
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>移除该学员？</div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 18, lineHeight: 1.6 }}>
+            {client.name} 将从你的客户列表移除，你将不再能看到TA的数据。TA仍归属于{otherCoaches.map((c) => c.name).join("、")}，账号和所有记录都会保留，不会被删除。
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="press-fx" style={{ ...btnGhost, flex: 1 }} onClick={() => setStage("choose")}>返回</button>
+            <button className="press-fx" style={{ ...btnPrimary, flex: 1 }} onClick={handleRemove}>确认移除</button>
+          </div>
+        </div>
+      )}
+
+      {stage === "confirmDelete" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, color: C.coral }}>
+            <AlertTriangle size={18} />
+            <div style={{ fontSize: 15, fontWeight: 700 }}>彻底删除 {client.name}？</div>
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 14, lineHeight: 1.6 }}>
+            删除后这个学员的账号、以及他名下的饮食记录、体测记录、训练记录、训练计划、体态评估和照片，都会被永久清除，无法恢复。
+          </div>
+          <div style={{ ...cardSt, background: C.panelAlt, marginBottom: 14 }}>
+            {counts.length === 0 ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 10 }}><Loader2 className="spin" size={16} /></div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {counts.map((c) => (
+                  <div key={c.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                    <span style={{ color: C.muted }}>{c.label}</span>
+                    <span style={{ fontWeight: 700 }}>{c.count} 条</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: C.muted, marginBottom: 16, cursor: "pointer" }}>
+            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} style={{ marginTop: 2 }} />
+            我已了解此操作不可恢复，确认要永久删除这个学员账号
+          </label>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="press-fx" style={{ ...btnGhost, flex: 1 }} onClick={otherCoaches.length > 0 ? () => setStage("choose") : onClose}>取消</button>
+            <button
+              className="press-fx"
+              disabled={!ack || counts.length === 0}
+              style={{ ...btnPrimary, flex: 1, background: C.coral, opacity: !ack || counts.length === 0 ? 0.5 : 1, cursor: !ack || counts.length === 0 ? "not-allowed" : "pointer" }}
+              onClick={handleFullDelete}
+            >
+              永久删除
+            </button>
+          </div>
+        </div>
+      )}
+
+      {stage === "working" && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 20 }}>
+          <Loader2 className="spin" size={20} />
+          <div style={{ fontSize: 12, color: C.muted }}>处理中，请稍候…</div>
+        </div>
+      )}
+
+      {stage === "error" && (
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.coral, marginBottom: 10 }}>操作失败</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>{errMsg}</div>
+          <button className="press-fx" style={{ ...btnGhost, width: "100%" }} onClick={onClose}>关闭</button>
+        </div>
+      )}
+    </ModalShell>
   );
 }
 
@@ -1254,11 +1442,12 @@ function ClientApp({ profile }) {
   const [appointments, setAppointments] = useState([]);
   const [packages, setPackages] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [coaches, setCoaches] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [{ data: d }, { data: b }, { data: t }, { data: p }, { data: pos }, { data: ph }, { data: ap }, { data: pk }, { data: unread }] = await Promise.all([
+    const [{ data: d }, { data: b }, { data: t }, { data: p }, { data: pos }, { data: ph }, { data: ap }, { data: pk }, { data: unread }, { data: coachRels }] = await Promise.all([
       supabase.from("diet_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
       supabase.from("body_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
       supabase.from("train_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
@@ -1268,10 +1457,18 @@ function ClientApp({ profile }) {
       supabase.from("appointments").select("*").eq("client_id", profile.id).order("requested_date", { ascending: true }).order("requested_time", { ascending: true }),
       supabase.from("session_packages").select("*").eq("client_id", profile.id),
       supabase.from("messages").select("id").eq("client_id", profile.id).eq("read_by_client", false),
+      supabase.from("client_coaches").select("coach_id").eq("client_id", profile.id),
     ]);
     setDietLog(d || []); setBodyLog(b || []); setTrainLog(t || []); setPlans(p || []);
     setPosture(pos || { assessment: "", suggestions: "" });
     setAppointments(ap || []); setPackages(pk || []); setUnreadCount((unread || []).length);
+    const coachIds = (coachRels || []).map((r) => r.coach_id);
+    if (coachIds.length > 0) {
+      const { data: coachProfiles } = await supabase.from("profiles").select("id,name").in("id", coachIds);
+      setCoaches(coachProfiles || []);
+    } else {
+      setCoaches([]);
+    }
     const withUrls = await Promise.all((ph || []).map(async (row) => {
       const { data } = await supabase.storage.from("posture-photos").createSignedUrl(row.image_path, 3600);
       return { ...row, url: data?.signedUrl };
@@ -1348,7 +1545,7 @@ function ClientApp({ profile }) {
         )}
         {tab === "diet" && <ClientDietTab log={dietLog} onAdd={addDiet} />}
         {tab === "body" && <ClientBodyTab log={bodyLog} onAdd={addBody} />}
-        {tab === "train" && <ClientTrainTab log={trainLog} onAdd={addTrain} />}
+        {tab === "train" && <ClientTrainTab log={trainLog} onAdd={addTrain} coaches={coaches} />}
         {tab === "posture" && <PosturePanel posture={posture} photos={photos} editable={false} onAddPhoto={addPhoto} />}
       </div>
       <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", background: C.panel, borderTop: `1px solid ${C.border}`, padding: "8px 4px" }}>
@@ -1567,16 +1764,17 @@ function ClientBodyTab({ log, onAdd }) {
   );
 }
 
-function ClientTrainTab({ log, onAdd }) {
+function ClientTrainTab({ log, onAdd, coaches }) {
   const [type, setType] = useState("");
   const [duration, setDuration] = useState("");
   const [notes, setNotes] = useState("");
   const [isTrip, setIsTrip] = useState(false);
   const [location, setLocation] = useState("");
+  const [coachId, setCoachId] = useState("");
   function submit() {
     if (!type.trim() || !duration) return;
-    onAdd({ date: todayStr(), type: type.trim(), duration: parseInt(duration, 10), notes: notes.trim(), is_trip: isTrip, location: isTrip ? location.trim() : null });
-    setType(""); setDuration(""); setNotes(""); setLocation("");
+    onAdd({ date: todayStr(), type: type.trim(), duration: parseInt(duration, 10), notes: notes.trim(), is_trip: isTrip, location: isTrip ? location.trim() : null, coach_id: coachId || null });
+    setType(""); setDuration(""); setNotes(""); setLocation(""); setCoachId("");
   }
   return (
     <div>
@@ -1586,6 +1784,15 @@ function ClientTrainTab({ log, onAdd }) {
         <input style={{ ...inputSt, marginBottom: 10 }} value={type} onChange={(e) => setType(e.target.value)} placeholder="例如：酒店房间自重训练 / 跑步 / 力量" />
         <label style={labelSt}>时长（分钟）</label>
         <input style={{ ...inputSt, marginBottom: 10 }} value={duration} inputMode="numeric" onChange={(e) => setDuration(e.target.value.replace(/\D/g, ""))} placeholder="30" />
+        {coaches.length > 0 && (
+          <>
+            <label style={labelSt}>本次训练找哪位教练</label>
+            <select style={{ ...inputSt, marginBottom: 10 }} value={coachId} onChange={(e) => setCoachId(e.target.value)}>
+              <option value="">不指定</option>
+              {coaches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </>
+        )}
         <label style={labelSt}>备注</label>
         <textarea style={{ ...inputSt, minHeight: 60, marginBottom: 10, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="动作/感受/强度" />
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.muted, marginBottom: 10 }}>
