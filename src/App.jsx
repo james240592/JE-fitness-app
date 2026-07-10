@@ -6,6 +6,7 @@ import {
   Users, User, Utensils, Scale, Dumbbell, ClipboardList, LogOut, Plus,
   Plane, TrendingUp, TrendingDown, Minus, ChevronRight, X, Check,
   ArrowLeft, Loader2, ImagePlus, Home, Ruler, Mail, Lock, Flame, Sparkles, Trophy,
+  MessageCircle, Send, CalendarDays, Ticket, Undo2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -211,7 +212,7 @@ function Brand({ subtitle }) {
       <Logo />
       <div>
         <div style={{ fontFamily: "'Noto Serif SC', serif", fontSize: 19, fontWeight: 700, letterSpacing: 1 }}>
-          正位 <span style={{ color: C.gold, fontSize: 13, fontWeight: 400, letterSpacing: 2 }}>ALIGN</span>
+          律动 <span style={{ color: C.gold, fontSize: 13, fontWeight: 400, letterSpacing: 2 }}>PULSE</span>
         </div>
         {subtitle && <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>{subtitle}</div>}
       </div>
@@ -364,8 +365,8 @@ function AuthScreen() {
     <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: 32, minHeight: "100vh" }}>
       <div style={{ textAlign: "center", marginBottom: 32 }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><Logo size={44} /></div>
-        <div style={{ fontFamily: "'Noto Serif SC', serif", fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>正位</div>
-        <div style={{ fontSize: 12, color: C.gold, letterSpacing: 4, marginTop: 4 }}>ALIGN · 私教客户管理</div>
+        <div style={{ fontFamily: "'Noto Serif SC', serif", fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>律动</div>
+        <div style={{ fontSize: 12, color: C.gold, letterSpacing: 4, marginTop: 4 }}>PULSE · 私教客户管理</div>
       </div>
       <div style={{ display: "flex", marginBottom: 20, borderRadius: 10, border: `1px solid ${C.border}`, overflow: "hidden" }}>
         {["login", "signup"].map((m) => (
@@ -416,8 +417,16 @@ function CoachApp({ profile }) {
 
   const loadClients = useCallback(async () => {
     setLoading(true);
-    const { data: cl } = await supabase.from("profiles").select("*").eq("role", "client").order("name");
+    const [{ data: cl }, { data: unread }, { data: pending }] = await Promise.all([
+      supabase.from("profiles").select("*").eq("role", "client").order("name"),
+      supabase.from("messages").select("client_id").eq("read_by_coach", false),
+      supabase.from("appointments").select("client_id").eq("status", "pending"),
+    ]);
     setClients(cl || []);
+    const unreadCounts = {};
+    (unread || []).forEach((m) => { unreadCounts[m.client_id] = (unreadCounts[m.client_id] || 0) + 1; });
+    const pendingCounts = {};
+    (pending || []).forEach((a) => { pendingCounts[a.client_id] = (pendingCounts[a.client_id] || 0) + 1; });
     const sums = await Promise.all((cl || []).map(async (c) => {
       const { data: body } = await supabase.from("body_logs").select("date,weight,bodyfat").eq("user_id", c.id).order("date", { ascending: false }).limit(2);
       const last = body?.[0], prev = body?.[1];
@@ -426,6 +435,8 @@ function CoachApp({ profile }) {
         weight: last?.weight ?? null, bodyfat: last?.bodyfat ?? null,
         delta: last && prev ? +(last.weight - prev.weight).toFixed(1) : null,
         lastDate: last?.date ?? null,
+        unread: unreadCounts[c.id] || 0,
+        pendingAppointments: pendingCounts[c.id] || 0,
       };
     }));
     setSummaries(sums);
@@ -472,7 +483,11 @@ function CoachHome({ clients, summaries, loading, onOpen, onLogout }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ width: 36, height: 36, borderRadius: "50%", background: C.jadeDim, color: C.jade, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14 }}>{c.name.slice(0, 1)}</span>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</div>
+                      <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                        {c.name}
+                        {!!s?.unread && <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: C.coral, borderRadius: 20, padding: "1px 6px" }}>{s.unread} 条新消息</span>}
+                        {!!s?.pendingAppointments && <span style={{ fontSize: 10, fontWeight: 700, color: C.goldBright, background: "rgba(201,161,90,0.18)", borderRadius: 20, padding: "1px 6px" }}>{s.pendingAppointments} 个待确认</span>}
+                      </div>
                       <div style={{ fontSize: 11, color: C.muted }}>{s?.lastDate ? `最近记录 ${fmtDate(s.lastDate)}` : "暂无体测记录"}</div>
                     </div>
                   </div>
@@ -548,6 +563,9 @@ function CoachClientDetail({ client, onBack }) {
     { k: "train", label: "训练日志", icon: Dumbbell },
     { k: "plan", label: "训练计划", icon: ClipboardList },
     { k: "posture", label: "体态", icon: Ruler },
+    { k: "booking", label: "预约", icon: CalendarDays },
+    { k: "sessions", label: "课时", icon: Ticket },
+    { k: "chat", label: "聊天", icon: MessageCircle },
   ];
 
   if (loading) return <CenterLoader />;
@@ -573,6 +591,9 @@ function CoachClientDetail({ client, onBack }) {
         {tab === "train" && <TrainListReadOnly log={trainLog} />}
         {tab === "plan" && <PlanPanel plans={plans} onAdd={addPlan} editable />}
         {tab === "posture" && <PosturePanel posture={posture} photos={photos} editable onSave={savePosture} onAddPhoto={addPhoto} />}
+        {tab === "booking" && <CoachAppointmentsPanel client={client} />}
+        {tab === "sessions" && <SessionPackagePanel client={client} />}
+        {tab === "chat" && <ChatScreen clientId={client.id} myRole="coach" embedded />}
       </div>
     </div>
   );
@@ -737,6 +758,7 @@ function PosturePanel({ posture, photos, editable, onSave, onAddPhoto }) {
           </button>
         )}
       </div>
+      <PostureCompareCard photos={photos} />
       <div style={cardSt}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>体态照片对比</div>
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -766,10 +788,462 @@ function PosturePanel({ posture, photos, editable, onSave, onAddPhoto }) {
   );
 }
 
+/* ---------------- 体态变化滑动对比 ---------------- */
+function PostureCompareCard({ photos }) {
+  const [label, setLabel] = useState("正面");
+  const [beforeId, setBeforeId] = useState("");
+  const [afterId, setAfterId] = useState("");
+  const [pct, setPct] = useState(50);
+  const draggingRef = useRef(false);
+  const boxRef = useRef(null);
+
+  const group = photos.filter((p) => p.label === label).slice().sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+
+  useEffect(() => {
+    if (group.length >= 2) {
+      setBeforeId((id) => (group.some((p) => p.id === id) ? id : group[0].id));
+      setAfterId((id) => (group.some((p) => p.id === id) ? id : group[group.length - 1].id));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [label, photos.length]);
+
+  const before = group.find((p) => p.id === beforeId);
+  const after = group.find((p) => p.id === afterId);
+
+  function updatePct(clientX) {
+    const box = boxRef.current;
+    if (!box) return;
+    const rect = box.getBoundingClientRect();
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+    setPct(Math.round((x / rect.width) * 100));
+  }
+  function onDown(e) { draggingRef.current = true; updatePct(e.touches ? e.touches[0].clientX : e.clientX); }
+  function onMove(e) { if (draggingRef.current) updatePct(e.touches ? e.touches[0].clientX : e.clientX); }
+  function onUp() { draggingRef.current = false; }
+
+  return (
+    <div style={{ ...cardSt, marginBottom: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>体态变化对比</div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        {["正面", "侧面", "背面"].map((l) => (
+          <button key={l} onClick={() => setLabel(l)} style={{ background: label === l ? C.jadeDim : "transparent", color: label === l ? C.jade : C.muted, border: `1px solid ${C.border}`, borderRadius: 20, padding: "5px 12px", fontSize: 12, cursor: "pointer" }}>{l}</button>
+        ))}
+      </div>
+      {group.length < 2 ? (
+        <EmptyState text={`${label}角度还没有两张以上照片，先多拍几次再来对比吧`} icon={Ruler} />
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelSt}>之前</label>
+              <select style={inputSt} value={beforeId} onChange={(e) => setBeforeId(e.target.value)}>
+                {group.map((p) => <option key={p.id} value={p.id}>{fmtDate(p.created_at?.slice(0, 10))}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelSt}>之后</label>
+              <select style={inputSt} value={afterId} onChange={(e) => setAfterId(e.target.value)}>
+                {group.map((p) => <option key={p.id} value={p.id}>{fmtDate(p.created_at?.slice(0, 10))}</option>)}
+              </select>
+            </div>
+          </div>
+          <div
+            ref={boxRef}
+            onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+            onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+            style={{ position: "relative", height: 260, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.border}`, cursor: "ew-resize", userSelect: "none", touchAction: "none" }}
+          >
+            {after?.url && <img src={after.url} alt="之后" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+            {before?.url && (
+              <img src={before.url} alt="之前" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", clipPath: `inset(0 ${100 - pct}% 0 0)` }} />
+            )}
+            <div style={{ position: "absolute", top: 0, bottom: 0, left: `${pct}%`, width: 2, background: C.goldBright, transform: "translateX(-1px)" }} />
+            <div style={{ position: "absolute", top: "50%", left: `${pct}%`, transform: "translate(-50%,-50%)", width: 28, height: 28, borderRadius: "50%", background: C.goldBright, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
+              <div style={{ width: 10, height: 10, borderLeft: "2px solid #12171B", borderRight: "2px solid #12171B" }} />
+            </div>
+            <span style={{ position: "absolute", left: 8, bottom: 8, fontSize: 10, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 6px", borderRadius: 6 }}>之前</span>
+            <span style={{ position: "absolute", right: 8, bottom: 8, fontSize: 10, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 6px", borderRadius: 6 }}>之后</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 聊天 ---------------- */
+function ChatScreen({ clientId, myRole, onBack, embedded = false }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [myId, setMyId] = useState(null);
+  const listRef = useRef(null);
+
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null)); }, []);
+
+  const markRead = useCallback(async () => {
+    const field = myRole === "coach" ? "read_by_coach" : "read_by_client";
+    await supabase.from("messages").update({ [field]: true }).eq("client_id", clientId).eq(field, false);
+  }, [clientId, myRole]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("messages").select("*").eq("client_id", clientId).order("created_at", { ascending: true });
+    setMessages(data || []);
+    setLoading(false);
+    markRead();
+  }, [clientId, markRead]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`messages-${clientId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `client_id=eq.${clientId}` }, (payload) => {
+        setMessages((prev) => [...prev, payload.new]);
+        if (payload.new.sender_role !== myRole) markRead();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [clientId, myRole, markRead]);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length]);
+
+  async function send() {
+    const body = text.trim();
+    if (!body || !myId) return;
+    setSending(true);
+    setText("");
+    const field = myRole === "coach" ? "read_by_coach" : "read_by_client";
+    const otherField = myRole === "coach" ? "read_by_client" : "read_by_coach";
+    await supabase.from("messages").insert({
+      client_id: clientId, sender_id: myId, sender_role: myRole, body,
+      [field]: true, [otherField]: false,
+    });
+    setSending(false);
+  }
+
+  return (
+    <div style={embedded
+      ? { display: "flex", flexDirection: "column", height: 460, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden" }
+      : { flex: 1, display: "flex", flexDirection: "column", minHeight: "100vh" }}
+    >
+      {!embedded && (
+        <div style={{ padding: "16px 20px 10px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", display: "flex" }}><ArrowLeft size={18} /></button>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>{myRole === "coach" ? "与客户聊天" : "与教练聊天"}</div>
+        </div>
+      )}
+      <div ref={listRef} style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        {loading ? <CenterLoader /> : messages.length === 0 ? (
+          <EmptyState text="还没有消息，打个招呼吧" icon={MessageCircle} />
+        ) : messages.map((m) => {
+          const mine = m.sender_role === myRole;
+          return (
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+              <div style={{
+                maxWidth: "78%", padding: "9px 13px", borderRadius: 14,
+                background: mine ? C.jade : C.panelAlt, color: mine ? "#0C1210" : C.text,
+                fontSize: 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                border: mine ? "none" : `1px solid ${C.border}`,
+              }}>
+                {m.body}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 8, padding: "10px 14px", borderTop: `1px solid ${C.border}`, paddingBottom: embedded ? 10 : "max(10px, env(safe-area-inset-bottom))" }}>
+        <input
+          style={{ ...inputSt, flex: 1 }} value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="输入消息…"
+        />
+        <button className="press-fx" onClick={send} disabled={sending || !text.trim()} style={{ ...btnPrimary, width: 44, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Send size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- 到店预约 ---------------- */
+function statusBadge(status) {
+  const map = {
+    pending: { label: "待确认", bg: "rgba(201,161,90,0.18)", color: C.goldBright },
+    confirmed: { label: "已确认", bg: C.jadeDim, color: C.jade },
+    declined: { label: "已婉拒", bg: "rgba(217,118,95,0.18)", color: C.coral },
+    cancelled: { label: "已取消", bg: "rgba(217,118,95,0.18)", color: C.coral },
+    completed: { label: "已完成", bg: C.panelAlt, color: C.muted },
+  };
+  const s = map[status] || map.pending;
+  return <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 20, background: s.bg, color: s.color, whiteSpace: "nowrap" }}>{s.label}</span>;
+}
+
+function ClientBookingScreen({ profile, onBack }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("appointments").select("*").eq("client_id", profile.id)
+      .order("requested_date", { ascending: false }).order("requested_time", { ascending: false });
+    setList(data || []);
+    setLoading(false);
+  }, [profile.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function submit() {
+    if (!date || !time) return;
+    setBusy(true);
+    await supabase.from("appointments").insert({ client_id: profile.id, requested_date: date, requested_time: time, note: note.trim() || null, status: "pending" });
+    setDate(""); setTime(""); setNote("");
+    setBusy(false);
+    load();
+  }
+  async function cancel(id) {
+    await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id);
+    load();
+  }
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <div style={{ padding: "16px 20px 10px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 8 }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", display: "flex" }}><ArrowLeft size={18} /></button>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>到店预约</div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 18 }}>
+        <div style={{ ...cardSt, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>申请到店时间</div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelSt}>日期</label>
+              <input type="date" style={inputSt} value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelSt}>时间</label>
+              <input type="time" style={inputSt} value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+          </div>
+          <label style={labelSt}>备注（可选）</label>
+          <textarea style={{ ...inputSt, minHeight: 60, marginBottom: 10, resize: "vertical" }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="想练的部位/特殊情况…" />
+          <button className="press-fx" style={btnPrimary} onClick={submit} disabled={busy || !date || !time}>{busy ? "提交中…" : "提交预约申请"}</button>
+        </div>
+        {loading ? <CenterLoader /> : list.length === 0 ? <EmptyState text="还没有预约记录" icon={CalendarDays} /> : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {list.map((a) => (
+              <div key={a.id} className="fade-up" style={cardSt}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtDate(a.requested_date)} {a.requested_time}</div>
+                  {statusBadge(a.status)}
+                </div>
+                {a.note && <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>{a.note}</div>}
+                {a.coach_note && <div style={{ fontSize: 12, color: C.gold, marginTop: 4 }}>教练回复：{a.coach_note}</div>}
+                {(a.status === "pending" || a.status === "confirmed") && (
+                  <button className="press-fx" onClick={() => cancel(a.id)} style={{ ...btnGhost, marginTop: 10, fontSize: 12, padding: "6px 12px" }}>取消预约</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AppointmentCoachRow({ a, onRespond }) {
+  const [replyNote, setReplyNote] = useState("");
+  const [showDecline, setShowDecline] = useState(false);
+  return (
+    <div className="fade-up" style={cardSt}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtDate(a.requested_date)} {a.requested_time}</div>
+        {statusBadge(a.status)}
+      </div>
+      {a.note && <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>客户备注：{a.note}</div>}
+      {a.coach_note && <div style={{ fontSize: 12, color: C.gold, marginTop: 4 }}>{a.coach_note}</div>}
+      {a.status === "pending" && !showDecline && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button className="press-fx" style={{ ...btnPrimary, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => onRespond(a.id, "confirmed")}>确认</button>
+          <button className="press-fx" style={{ ...btnGhost, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => setShowDecline(true)}>婉拒</button>
+        </div>
+      )}
+      {showDecline && (
+        <div style={{ marginTop: 10 }}>
+          <input style={{ ...inputSt, marginBottom: 8, fontSize: 12 }} value={replyNote} onChange={(e) => setReplyNote(e.target.value)} placeholder="婉拒原因（可选）" />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="press-fx" style={{ ...btnPrimary, flex: 1, fontSize: 12, padding: "8px 0", background: C.coral }} onClick={() => { onRespond(a.id, "declined", replyNote.trim()); setShowDecline(false); }}>确认婉拒</button>
+            <button className="press-fx" style={{ ...btnGhost, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => setShowDecline(false)}>取消</button>
+          </div>
+        </div>
+      )}
+      {a.status === "confirmed" && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button className="press-fx" style={{ ...btnPrimary, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => onRespond(a.id, "completed")}>标记已完成</button>
+          <button className="press-fx" style={{ ...btnGhost, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => onRespond(a.id, "cancelled")}>取消</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CoachAppointmentsPanel({ client }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [note, setNote] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("appointments").select("*").eq("client_id", client.id)
+      .order("requested_date", { ascending: false }).order("requested_time", { ascending: false });
+    setList(data || []);
+    setLoading(false);
+  }, [client.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function respond(id, status, coach_note) {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("appointments").update({ status, coach_note: coach_note || null, coach_id: user.id, updated_at: new Date().toISOString() }).eq("id", id);
+    load();
+  }
+  async function addDirect() {
+    if (!date || !time) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("appointments").insert({ client_id: client.id, coach_id: user.id, requested_date: date, requested_time: time, note: note.trim() || null, status: "confirmed" });
+    setDate(""); setTime(""); setNote("");
+    load();
+  }
+
+  return (
+    <div>
+      <div style={{ ...cardSt, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>直接安排到店时间</div>
+        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelSt}>日期</label>
+            <input type="date" style={inputSt} value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelSt}>时间</label>
+            <input type="time" style={inputSt} value={time} onChange={(e) => setTime(e.target.value)} />
+          </div>
+        </div>
+        <input style={{ ...inputSt, marginBottom: 10 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="备注（可选）" />
+        <button className="press-fx" style={btnPrimary} onClick={addDirect} disabled={!date || !time}>直接确认排期</button>
+      </div>
+      {loading ? <CenterLoader /> : list.length === 0 ? <EmptyState text="还没有预约记录" icon={CalendarDays} /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {list.map((a) => <AppointmentCoachRow key={a.id} a={a} onRespond={respond} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 课时管理 ---------------- */
+function SessionPackagePanel({ client }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [total, setTotal] = useState("");
+  const [price, setPrice] = useState("");
+  const [note, setNote] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("session_packages").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
+    setList(data || []);
+    setLoading(false);
+  }, [client.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function addPackage() {
+    const t = parseInt(total, 10);
+    if (!t || t <= 0) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("session_packages").insert({
+      client_id: client.id, coach_id: user.id, total_sessions: t,
+      price: price ? parseFloat(price) : null, purchase_date: todayStr(), note: note.trim() || null,
+    });
+    setTotal(""); setPrice(""); setNote(""); setShowForm(false);
+    load();
+  }
+  async function bump(pkg, delta) {
+    const next = Math.min(pkg.total_sessions, Math.max(0, pkg.used_sessions + delta));
+    await supabase.from("session_packages").update({ used_sessions: next }).eq("id", pkg.id);
+    load();
+  }
+
+  return (
+    <div>
+      <button onClick={() => setShowForm((v) => !v)} className="press-fx" style={{ ...btnPrimary, width: "100%", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        <Plus size={16} /> 购买新课时包
+      </button>
+      {showForm && (
+        <div style={{ ...cardSt, marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={labelSt}>总节数</label>
+              <input style={inputSt} value={total} inputMode="numeric" onChange={(e) => setTotal(e.target.value.replace(/\D/g, ""))} placeholder="10" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelSt}>金额（可选）</label>
+              <input style={inputSt} value={price} inputMode="decimal" onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="3000" />
+            </div>
+          </div>
+          <label style={labelSt}>备注（可选）</label>
+          <input style={{ ...inputSt, marginBottom: 10 }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：私教10次卡" />
+          <button className="press-fx" style={btnPrimary} onClick={addPackage}>保存课时包</button>
+        </div>
+      )}
+      {loading ? <CenterLoader /> : list.length === 0 ? <EmptyState text="还没有课时包记录" icon={Ticket} /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {list.map((p) => {
+            const remaining = p.total_sessions - p.used_sessions;
+            const pct = Math.min(100, (p.used_sessions / p.total_sessions) * 100);
+            return (
+              <div key={p.id} className="fade-up" style={cardSt}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{p.note || "课时包"}</div>
+                  <div style={{ fontSize: 12, color: C.muted }}>{fmtDate(p.purchase_date)}</div>
+                </div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 8, marginBottom: 4 }}>
+                  已用 {p.used_sessions} / {p.total_sessions} 节 · 剩余 <b style={{ color: remaining > 0 ? C.jadeBright : C.coral }}>{remaining}</b>
+                  {p.price != null && <span> · ¥{p.price}</span>}
+                </div>
+                <div style={{ height: 6, borderRadius: 4, background: C.panelAlt, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: C.jade, transition: "width 300ms" }} />
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button className="press-fx" style={{ ...btnPrimary, flex: 1, fontSize: 12, padding: "8px 0" }} onClick={() => bump(p, 1)} disabled={remaining <= 0}>记一次消课</button>
+                  <button className="press-fx" style={{ ...btnGhost, flex: 1, fontSize: 12, padding: "8px 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }} onClick={() => bump(p, -1)} disabled={p.used_sessions <= 0}><Undo2 size={13} /> 撤销上一次</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ================================================================
    客户端
    ================================================================ */
 function ClientApp({ profile }) {
+  const [screen, setScreen] = useState("tabs");
   const [tab, setTab] = useState("home");
   const [dietLog, setDietLog] = useState([]);
   const [bodyLog, setBodyLog] = useState([]);
@@ -777,20 +1251,27 @@ function ClientApp({ profile }) {
   const [plans, setPlans] = useState([]);
   const [posture, setPosture] = useState({ assessment: "", suggestions: "" });
   const [photos, setPhotos] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [packages, setPackages] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [{ data: d }, { data: b }, { data: t }, { data: p }, { data: pos }, { data: ph }] = await Promise.all([
+    const [{ data: d }, { data: b }, { data: t }, { data: p }, { data: pos }, { data: ph }, { data: ap }, { data: pk }, { data: unread }] = await Promise.all([
       supabase.from("diet_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
       supabase.from("body_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
       supabase.from("train_logs").select("*").eq("user_id", profile.id).order("date", { ascending: false }),
       supabase.from("plans").select("*").eq("client_id", profile.id).order("date", { ascending: false }),
       supabase.from("posture").select("*").eq("client_id", profile.id).maybeSingle(),
       supabase.from("posture_photos").select("*").eq("client_id", profile.id).order("created_at", { ascending: false }),
+      supabase.from("appointments").select("*").eq("client_id", profile.id).order("requested_date", { ascending: true }).order("requested_time", { ascending: true }),
+      supabase.from("session_packages").select("*").eq("client_id", profile.id),
+      supabase.from("messages").select("id").eq("client_id", profile.id).eq("read_by_client", false),
     ]);
     setDietLog(d || []); setBodyLog(b || []); setTrainLog(t || []); setPlans(p || []);
     setPosture(pos || { assessment: "", suggestions: "" });
+    setAppointments(ap || []); setPackages(pk || []); setUnreadCount((unread || []).length);
     const withUrls = await Promise.all((ph || []).map(async (row) => {
       const { data } = await supabase.storage.from("posture-photos").createSignedUrl(row.image_path, 3600);
       return { ...row, url: data?.signedUrl };
@@ -833,16 +1314,38 @@ function ClientApp({ profile }) {
     { k: "posture", label: "体态", icon: Ruler },
   ];
 
+  const nextAppointment = appointments.find((a) => (a.status === "pending" || a.status === "confirmed") && a.requested_date >= todayStr());
+  const remainingSessions = packages.reduce((sum, p) => sum + (p.total_sessions - p.used_sessions), 0);
+
   if (loading) return <CenterLoader />;
+
+  if (screen === "chat") {
+    return <ChatScreen clientId={profile.id} myRole="client" onBack={() => { setScreen("tabs"); loadAll(); }} />;
+  }
+  if (screen === "booking") {
+    return <ClientBookingScreen profile={profile} onBack={() => { setScreen("tabs"); loadAll(); }} />;
+  }
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       <div style={{ padding: "18px 20px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${C.border}` }}>
         <Brand subtitle={`你好，${profile.name}`} />
-        <button onClick={() => supabase.auth.signOut()} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer" }}><LogOut size={19} /></button>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <button onClick={() => setScreen("chat")} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", position: "relative", display: "flex" }}>
+            <MessageCircle size={19} />
+            {unreadCount > 0 && <span style={{ position: "absolute", top: -3, right: -3, width: 9, height: 9, borderRadius: "50%", background: C.coral, border: `1.5px solid ${C.panel}` }} />}
+          </button>
+          <button onClick={() => supabase.auth.signOut()} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer" }}><LogOut size={19} /></button>
+        </div>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: 18, paddingBottom: 90 }}>
-        {tab === "home" && <ClientHomeTab profile={profile} bodyLog={bodyLog} plans={plans} posture={posture} streak={streak} activeDays={activeDays} onGo={setTab} />}
+        {tab === "home" && (
+          <ClientHomeTab
+            profile={profile} bodyLog={bodyLog} plans={plans} posture={posture} streak={streak} activeDays={activeDays} onGo={setTab}
+            nextAppointment={nextAppointment} remainingSessions={remainingSessions} hasPackages={packages.length > 0}
+            onOpenBooking={() => setScreen("booking")}
+          />
+        )}
         {tab === "diet" && <ClientDietTab log={dietLog} onAdd={addDiet} />}
         {tab === "body" && <ClientBodyTab log={bodyLog} onAdd={addBody} />}
         {tab === "train" && <ClientTrainTab log={trainLog} onAdd={addTrain} />}
@@ -860,7 +1363,7 @@ function ClientApp({ profile }) {
   );
 }
 
-function ClientHomeTab({ profile, bodyLog, plans, posture, streak, activeDays, onGo }) {
+function ClientHomeTab({ profile, bodyLog, plans, posture, streak, activeDays, onGo, nextAppointment, remainingSessions, hasPackages, onOpenBooking }) {
   const latestPlan = plans[0];
   const latest = bodyLog[0];
   const prev = bodyLog[1];
@@ -919,6 +1422,34 @@ function ClientHomeTab({ profile, bodyLog, plans, posture, streak, activeDays, o
           </>
         ) : <div style={{ fontSize: 13, color: C.muted }}>教练还未布置计划</div>}
       </div>
+
+      <button onClick={onOpenBooking} className="fade-up press-fx" style={{ ...cardSt, display: "flex", alignItems: "center", gap: 12, animationDelay: "190ms", textAlign: "left", cursor: "pointer", color: C.text, width: "100%" }}>
+        <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.jadeDim, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <CalendarDays size={18} color={C.jade} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>到店预约</div>
+          {nextAppointment ? (
+            <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+              {fmtDate(nextAppointment.requested_date)} {nextAppointment.requested_time}
+              {statusBadge(nextAppointment.status)}
+            </div>
+          ) : <div style={{ fontSize: 13, fontWeight: 600 }}>点击申请下次到店时间</div>}
+        </div>
+        <ChevronRight size={16} color={C.muted} />
+      </button>
+
+      {hasPackages && (
+        <div className="fade-up" style={{ ...cardSt, animationDelay: "205ms", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: "50%", background: C.jadeDim, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Ticket size={18} color={C.gold} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 2 }}>剩余课时</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: remainingSessions > 0 ? C.jadeBright : C.coral }}>{remainingSessions} 节</div>
+          </div>
+        </div>
+      )}
 
       {posture.suggestions && (
         <div className="fade-up" style={{ ...cardSt, animationDelay: "220ms" }}>
