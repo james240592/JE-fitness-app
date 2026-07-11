@@ -654,7 +654,7 @@ function CoachClientDetail({ client, coachProfile, onBack }) {
         {tab === "posture" && <PosturePanel posture={posture} photos={photos} editable onSave={savePosture} onAddPhoto={addPhoto} />}
         {tab === "booking" && <CoachAppointmentsPanel client={client} />}
         {tab === "sessions" && <SessionPackagePanel client={client} />}
-        {tab === "chat" && <ChatScreen clientId={client.id} myRole="coach" embedded />}
+        {tab === "chat" && <ChatScreen clientId={client.id} myRole="coach" coachId={coachProfile.id} embedded />}
       </div>
     </div>
   );
@@ -1101,7 +1101,7 @@ function PostureCompareCard({ photos, label }) {
 }
 
 /* ---------------- 聊天 ---------------- */
-function ChatScreen({ clientId, myRole, onBack, embedded = false }) {
+function ChatScreen({ clientId, myRole, coachId, coaches = [], onBack, embedded = false }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
@@ -1141,15 +1141,24 @@ function ChatScreen({ clientId, myRole, onBack, embedded = false }) {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length]);
 
+  // messages.coach_id 是必填字段：教练发消息时就是教练自己；学员发消息时，
+  // 延续这个对话里最近一次出现过的教练，没有历史记录时退回学员唯一/首位教练。
+  function resolveCoachId() {
+    if (myRole === "coach") return coachId;
+    const lastWithCoach = [...messages].reverse().find((m) => m.coach_id);
+    return lastWithCoach?.coach_id ?? coaches[0]?.id ?? null;
+  }
+
   async function send() {
     const body = text.trim();
-    if (!body || !myId) return;
+    const targetCoachId = resolveCoachId();
+    if (!body || !myId || !targetCoachId) return;
     setSending(true);
     setText("");
     const field = myRole === "coach" ? "read_by_coach" : "read_by_client";
     const otherField = myRole === "coach" ? "read_by_client" : "read_by_coach";
     await supabase.from("messages").insert({
-      client_id: clientId, sender_id: myId, sender_role: myRole, body,
+      client_id: clientId, coach_id: targetCoachId, sender_id: myId, sender_role: myRole, body,
       [field]: true, [otherField]: false,
     });
     setSending(false);
@@ -1167,7 +1176,9 @@ function ChatScreen({ clientId, myRole, onBack, embedded = false }) {
         </div>
       )}
       <div ref={listRef} style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-        {loading ? <CenterLoader /> : messages.length === 0 ? (
+        {myRole === "client" && coaches.length === 0 ? (
+          <EmptyState text="暂无关联教练，无法发送消息" icon={MessageCircle} />
+        ) : loading ? <CenterLoader /> : messages.length === 0 ? (
           <EmptyState text="还没有消息，打个招呼吧" icon={MessageCircle} />
         ) : messages.map((m) => {
           const mine = m.sender_role === myRole;
@@ -1191,8 +1202,9 @@ function ChatScreen({ clientId, myRole, onBack, embedded = false }) {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
           placeholder="输入消息…"
+          disabled={myRole === "coach" ? !coachId : coaches.length === 0}
         />
-        <button className="press-fx" onClick={send} disabled={sending || !text.trim()} style={{ ...btnPrimary, width: 44, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <button className="press-fx" onClick={send} disabled={sending || !text.trim() || (myRole === "coach" ? !coachId : coaches.length === 0)} style={{ ...btnPrimary, width: 44, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Send size={16} />
         </button>
       </div>
@@ -1578,7 +1590,7 @@ function ClientApp({ profile }) {
   if (loading) return <CenterLoader />;
 
   if (screen === "chat") {
-    return <ChatScreen clientId={profile.id} myRole="client" onBack={() => { setScreen("tabs"); loadAll(); }} />;
+    return <ChatScreen clientId={profile.id} myRole="client" coaches={coaches} onBack={() => { setScreen("tabs"); loadAll(); }} />;
   }
   if (screen === "booking") {
     return <ClientBookingScreen profile={profile} coaches={coaches} onBack={() => { setScreen("tabs"); loadAll(); }} />;
